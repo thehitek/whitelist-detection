@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QSplitter,
     QCheckBox,
+    QLineEdit,
 )
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QFont
@@ -199,6 +200,9 @@ class WhitelistChecker(QMainWindow):
         self.alive_addresses = []
         self.minimal_subnets = []
         self.check_all_subnet_ips = False  # По умолчанию проверяем только первый и последний IP
+        
+        # Загружаем подсети из файла при запуске
+        self.load_minimal_subnets()
 
         self.init_ui()
 
@@ -254,8 +258,34 @@ class WhitelistChecker(QMainWindow):
         self.subnet_results.setReadOnly(True)
         self.subnet_results.setFont(QFont("Courier New", 9))
 
+        # Таб для проверки IP-адреса
+        self.check_ip_widget = QWidget()
+        check_ip_layout = QVBoxLayout()
+        
+        check_input_layout = QHBoxLayout()
+        check_input_layout.addWidget(QLabel("IP-адрес:"))
+        self.ip_input = QLineEdit()
+        self.ip_input.setPlaceholderText("Введите IP-адрес (например, 8.8.8.8)")
+        check_input_layout.addWidget(self.ip_input)
+        
+        self.check_ip_button = QPushButton("Проверить")
+        self.check_ip_button.clicked.connect(self.check_ip_in_subnets)
+        check_input_layout.addWidget(self.check_ip_button)
+        
+        self.ip_check_result = QTextEdit()
+        self.ip_check_result.setReadOnly(True)
+        self.ip_check_result.setFont(QFont("Courier New", 9))
+        self.ip_check_result.setMaximumHeight(200)
+        
+        check_ip_layout.addLayout(check_input_layout)
+        check_ip_layout.addWidget(QLabel("Результат проверки:"))
+        check_ip_layout.addWidget(self.ip_check_result)
+        
+        self.check_ip_widget.setLayout(check_ip_layout)
+
         self.tab_widget.addTab(self.ping_results, "Результаты пинга")
         self.tab_widget.addTab(self.subnet_results, "Минимальные подсети")
+        self.tab_widget.addTab(self.check_ip_widget, "Проверка IP")
 
         # Добавляем все в основной layout
         main_layout.addLayout(button_layout)
@@ -269,210 +299,117 @@ class WhitelistChecker(QMainWindow):
     def toggle_check_mode(self, state):
         self.check_all_subnet_ips = (state == Qt.CheckState.Checked.value)
 
-    def load_from_repo(self):
-        self.status_label.setText("Загрузка данных...")
-
-        # Проверяем, существует ли локальная копия репозитория
-        repo_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "russia-mobile-internet-whitelist",
-        )
-
-        if not os.path.exists(repo_path):
-            # Клонируем репозиторий
-            try:
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "https://github.com/hxehex/russia-mobile-internet-whitelist.git",
-                        repo_path,
-                    ],
-                    check=True,
-                )
-            except Exception as e:
-                self.status_label.setText(f"Ошибка при клонировании репозитория: {e}")
-                return
-
-        # Загружаем адреса из файлов
-        self.addresses = []
-
-        # Загружаем IP-адреса и объединяем их в подсети
-        ip_file = os.path.join(repo_path, "ipwhitelist.txt")
-        if os.path.exists(ip_file):
-            ip_addresses = []
-            with open(ip_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        ip_addresses.append(line)
-
-            # Объединяем последовательные IP-адреса в подсети
-            if ip_addresses:
-                try:
-                    ip_networks = [IPNetwork(ip) for ip in ip_addresses]
-                    merged_subnets = cidr_merge(ip_networks)
-                    for subnet in merged_subnets:
-                        self.addresses.append(str(subnet))
-                except Exception as e:
-                    print(f"Ошибка при объединении IP в подсети: {e}")
-                    # Если не удалось объединить, добавляем как есть
-                    self.addresses.extend(ip_addresses)
-
-        self.status_label.setText(f"Загружено {len(self.addresses)} адресов")
-        self.start_button.setEnabled(True)
-
-    def start_check(self):
-        if not self.addresses:
-            self.status_label.setText(
-                "Нет адресов для проверки. Сначала загрузите данные."
-            )
-            return
-
-        self.alive_addresses = []
-        self.ping_results.clear()
-        self.subnet_results.clear()
-        self.progress_bar.setValue(0)
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.status_label.setText("Проверка адресов...")
-
-        self.ping_worker = PingWorker(self.addresses, self.check_all_subnet_ips)
-        self.ping_worker.progress.connect(self.update_progress)
-        self.ping_worker.result.connect(self.handle_ping_result)
-        self.ping_worker.finished.connect(self.check_finished)
-        self.ping_worker.start()
-
-    def init_ui(self):
-        main_widget = QWidget()
-        main_layout = QVBoxLayout()
-
-        # Верхняя панель с кнопками
-        button_layout = QHBoxLayout()
-
-        self.load_button = QPushButton("Загрузить данные из репозитория")
-        self.load_button.clicked.connect(self.load_from_repo)
-
-        self.start_button = QPushButton("Начать проверку")
-        self.start_button.clicked.connect(self.start_check)
-        self.start_button.setEnabled(False)
-
-        self.stop_button = QPushButton("Остановить")
-        self.stop_button.clicked.connect(self.stop_check)
-        self.stop_button.setEnabled(False)
-
-        self.export_button = QPushButton("Экспорт результатов")
-        self.export_button.clicked.connect(self.export_results)
-        self.export_button.setEnabled(False)
-
-        self.check_all_checkbox = QCheckBox("Проверять все IP в подсетях")
-        self.check_all_checkbox.setChecked(False)
-        self.check_all_checkbox.stateChanged.connect(self.toggle_check_mode)
-
-        button_layout.addWidget(self.load_button)
-        button_layout.addWidget(self.start_button)
-        button_layout.addWidget(self.stop_button)
-        button_layout.addWidget(self.export_button)
-        button_layout.addWidget(self.check_all_checkbox)
-
-        # Прогресс-бар
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-
-        # Статус
-        self.status_label = QLabel("Готов к работе")
-
-        # Табы для отображения результатов
-        self.tab_widget = QTabWidget()
-
-        # Таб с результатами пинга
-        self.ping_results = QTextEdit()
-        self.ping_results.setReadOnly(True)
-        self.ping_results.setFont(QFont("Courier New", 9))
-
-        # Таб с минимальными подсетями
-        self.subnet_results = QTextEdit()
-        self.subnet_results.setReadOnly(True)
-        self.subnet_results.setFont(QFont("Courier New", 9))
-
-        self.tab_widget.addTab(self.ping_results, "Результаты пинга")
-        self.tab_widget.addTab(self.subnet_results, "Минимальные подсети")
-
-        # Добавляем все в основной layout
-        main_layout.addLayout(button_layout)
-        main_layout.addWidget(self.progress_bar)
-        main_layout.addWidget(self.status_label)
-        main_layout.addWidget(self.tab_widget)
-
-        main_widget.setLayout(main_layout)
-        self.setCentralWidget(main_widget)
-
-    def toggle_check_mode(self, state):
-        self.check_all_subnet_ips = (state == Qt.CheckState.Checked.value)
-
-    def load_from_repo(self):
-        self.status_label.setText("Загрузка данных...")
-
-        # Проверяем, существует ли локальная копия репозитория
-        repo_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "russia-mobile-internet-whitelist",
-        )
-
-        if not os.path.exists(repo_path):
-            # Клонируем репозиторий
-            try:
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "https://github.com/hxehex/russia-mobile-internet-whitelist.git",
-                        repo_path,
-                    ],
-                    check=True,
-                )
-            except Exception as e:
-                self.status_label.setText(f"Ошибка при клонировании репозитория: {e}")
-                return
-
-        # Загружаем адреса из файлов
-        self.addresses = []
-
-        # Загружаем IP-адреса и объединяем их в подсети
-        ip_file = os.path.join(repo_path, "ipwhitelist.txt")
-        if os.path.exists(ip_file):
-            ip_addresses = []
-            with open(ip_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        ip_addresses.append(line)
-
-            # Объединяем последовательные IP-адреса в подсети
-            if ip_addresses:
-                try:
-                    ip_networks = [IPNetwork(ip) for ip in ip_addresses]
-                    merged_subnets = cidr_merge(ip_networks)
-                    for subnet in merged_subnets:
-                        self.addresses.append(str(subnet))
-                except Exception as e:
-                    print(f"Ошибка при объединении IP в подсети: {e}")
-                    # Если не удалось объединить, добавляем как есть
-                    self.addresses.extend(ip_addresses)
-
-        # Загружаем подсети
-        subnet_file = os.path.join(repo_path, "cidrwhitelist.txt")
+    def load_minimal_subnets(self):
+        """Загружает подсети из файла minimal_subnets.txt"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        subnet_file = os.path.join(script_dir, "minimal_subnets.txt")
+        
         if os.path.exists(subnet_file):
-            with open(subnet_file, "r") as f:
+            try:
+                with open(subnet_file, "r", encoding="utf-8") as f:
+                    self.minimal_subnets = []
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            self.minimal_subnets.append(line)
+                print(f"Загружено {len(self.minimal_subnets)} подсетей из файла")
+            except Exception as e:
+                print(f"Ошибка при загрузке подсетей: {e}")
+                self.minimal_subnets = []
+        else:
+            self.minimal_subnets = []
+
+    def check_ip_in_subnets(self):
+        """Проверяет, принадлежит ли IP-адрес к одной из вычисленных подсетей"""
+        ip_address = self.ip_input.text().strip()
+        
+        if not ip_address:
+            self.ip_check_result.setText("Пожалуйста, введите IP-адрес")
+            return
+        
+        try:
+            # Проверяем валидность IP-адреса
+            ipaddress.ip_address(ip_address)
+        except ValueError:
+            self.ip_check_result.setText("Неверный формат IP-адреса")
+            return
+        
+        if not self.minimal_subnets:
+            self.ip_check_result.setText("Нет загруженных подсетей. Сначала выполните сканирование.")
+            return
+        
+        # Проверяем принадлежность IP к подсетям
+        matching_subnets = []
+        for subnet_str in self.minimal_subnets:
+            try:
+                subnet = ipaddress.ip_network(subnet_str, strict=False)
+                if ipaddress.ip_address(ip_address) in subnet:
+                    matching_subnets.append(subnet_str)
+            except Exception as e:
+                print(f"Ошибка при проверке подсети {subnet_str}: {e}")
+        
+        if matching_subnets:
+            result_text = f"IP-адрес {ip_address} принадлежит следующим подсетям:\n\n"
+            for subnet in matching_subnets:
+                result_text += f"✓ {subnet}\n"
+            self.ip_check_result.setText(result_text)
+        else:
+            self.ip_check_result.setText(f"IP-адрес {ip_address} не принадлежит ни одной из вычисленных подсетей")
+
+    def load_from_repo(self):
+        self.status_label.setText("Загрузка данных...")
+
+        # Проверяем, существует ли локальная копия репозитория
+        repo_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "russia-mobile-internet-whitelist",
+        )
+
+        if not os.path.exists(repo_path):
+            # Клонируем репозиторий
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "https://github.com/hxehex/russia-mobile-internet-whitelist.git",
+                        repo_path,
+                    ],
+                    check=True,
+                )
+            except Exception as e:
+                self.status_label.setText(f"Ошибка при клонировании репозитория: {e}")
+                return
+
+        # Загружаем адреса из файлов
+        self.addresses = []
+
+        # Загружаем IP-адреса и объединяем их в подсети
+        ip_file = os.path.join(repo_path, "ipwhitelist.txt")
+        if os.path.exists(ip_file):
+            ip_addresses = []
+            with open(ip_file, "r") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#"):
-                        self.addresses.append(line)
+                        ip_addresses.append(line)
 
-        # Загружаем домены
+            # Объединяем последовательные IP-адреса в подсети
+            if ip_addresses:
+                try:
+                    ip_networks = [IPNetwork(ip) for ip in ip_addresses]
+                    merged_subnets = cidr_merge(ip_networks)
+                    for subnet in merged_subnets:
+                        self.addresses.append(str(subnet))
+                except Exception as e:
+                    print(f"Ошибка при объединении IP в подсети: {e}")
+                    # Если не удалось объединить, добавляем как есть
+                    self.addresses.extend(ip_addresses)
+
+        # Загружаем домены из whitelist.txt
         domain_file = os.path.join(repo_path, "whitelist.txt")
         if os.path.exists(domain_file):
-            with open(domain_file, "r") as f:
+            with open(domain_file, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#"):
@@ -589,6 +526,8 @@ class WhitelistChecker(QMainWindow):
                 self.status_label.setText(
                     f"Проверка завершена. Доступно {len(self.alive_addresses)} из {len(self.addresses)} адресов. Сохранено в minimal_subnets.txt"
                 )
+                # Обновляем список подсетей в памяти
+                self.load_minimal_subnets()
             except Exception as e:
                 print(f"Ошибка при сохранении подсетей: {e}")
                 self.status_label.setText(
@@ -646,10 +585,3 @@ if __name__ == "__main__":
     window = WhitelistChecker()
     window.show()
     sys.exit(app.exec())
-    setText("Проверка адресов...")
-
-    self.ping_worker = PingWorker(self.addresses)
-    self.ping_worker.progress.connect(self.update_progress)
-    self.ping_worker.result.connect(self.handle_ping_result)
-    self.ping_worker.finished.connect(self.check_finished)
-    self.ping_worker.start()

@@ -7,6 +7,23 @@ echo Запуск Whitelist Checker
 echo ========================================
 echo.
 
+:: Проверяем наличие git и обновляем проект
+git --version >nul 2>&1
+if not errorlevel 1 (
+    echo [INFO] Проверка обновлений проекта...
+    git pull origin main
+    if errorlevel 1 (
+        echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось обновить проект
+    ) else (
+        echo [OK] Проект обновлен
+    )
+    echo.
+) else (
+    echo [ПРЕДУПРЕЖДЕНИЕ] Git не установлен или не добавлен в PATH
+    echo Автоматическое обновление недоступно
+    echo.
+)
+
 :: Проверяем наличие Python
 python --version >nul 2>&1
 if errorlevel 1 (
