@@ -576,13 +576,28 @@ class WhitelistChecker(QMainWindow):
             else:
                 self.subnet_results.append("Нет доступных подсетей")
 
+            # Сохраняем подсети в файл
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            subnet_file = os.path.join(script_dir, "minimal_subnets.txt")
+            try:
+                with open(subnet_file, "w", encoding="utf-8") as f:
+                    if minimal_subnets:
+                        for subnet in minimal_subnets:
+                            f.write(f"{subnet}\n")
+                    else:
+                        f.write("Нет доступных подсетей\n")
+                self.status_label.setText(
+                    f"Проверка завершена. Доступно {len(self.alive_addresses)} из {len(self.addresses)} адресов. Сохранено в minimal_subnets.txt"
+                )
+            except Exception as e:
+                print(f"Ошибка при сохранении подсетей: {e}")
+                self.status_label.setText(
+                    f"Проверка завершена. Доступно {len(self.alive_addresses)} из {len(self.addresses)} адресов"
+                )
+
             self.stop_button.setEnabled(False)
             self.start_button.setEnabled(True)
             self.export_button.setEnabled(True)
-
-            self.status_label.setText(
-                f"Проверка завершена. Доступно {len(self.alive_addresses)} из {len(self.addresses)} адресов"
-            )
         except Exception as e:
             print(f"Ошибка при отображении результатов подсетей: {e}")
             self.subnet_results.clear()
