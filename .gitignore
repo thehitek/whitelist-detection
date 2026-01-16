@@ -43,3 +43,5 @@ russia-mobile-internet-whitelist/
 
 # Logs
 *.log
+
+minimal_subnets.txt
