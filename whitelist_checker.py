@@ -55,39 +55,75 @@ class PingWorker(QThread):
 
     def ping_address(self, address):
         try:
+            # Определяем операционную систему
+            is_windows = sys.platform == 'win32'
+
             # Проверяем, является ли это подсетью
             if "/" in address and not self.check_all_subnet_ips:
                 # Пингуем только сетевой адрес
                 network = ipaddress.ip_network(address, strict=False)
                 test_ip = str(network.network_address)
-                result = subprocess.run(
-                    ["ping", "-c", "1", "-W", "2", test_ip],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                return result.returncode == 0
+
+                if is_windows:
+                    result = subprocess.run(
+                        ["ping", "-n", "2", "-w", "2000", test_ip],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    # На Windows проверяем наличие "TTL=" в выводе
+                    return "TTL=" in result.stdout
+                else:
+                    result = subprocess.run(
+                        ["ping", "-c", "1", "-w", "2", test_ip],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    return result.returncode == 0
             elif "/" in address and self.check_all_subnet_ips:
                 # Пингуем все IP в подсети
                 network = ipaddress.ip_network(address, strict=False)
                 for ip in network.hosts():
                     if not self.running:
                         return False
-                    result = subprocess.run(
-                        ["ping", "-c", "1", "-W", "2", str(ip)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
-                    if result.returncode == 0:
-                        return True
+
+                    if is_windows:
+                        result = subprocess.run(
+                            ["ping", "-n", "2", "-w", "2000", str(ip)],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                        # На Windows проверяем наличие "TTL=" в выводе
+                        if "TTL=" in result.stdout:
+                            return True
+                    else:
+                        result = subprocess.run(
+                            ["ping", "-c", "1", "-w", "2", str(ip)],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE
+                        )
+                        if result.returncode == 0:
+                            return True
                 return False
             else:
                 # Пингуем单个 адрес
-                result = subprocess.run(
-                    ["ping", "-c", "1", "-W", "2", address],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                return result.returncode == 0
+                if is_windows:
+                    result = subprocess.run(
+                        ["ping", "-n", "2", "-w", "2000", address],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    # На Windows проверяем наличие "TTL=" в выводе
+                    return "TTL=" in result.stdout
+                else:
+                    result = subprocess.run(
+                        ["ping", "-c", "1", "-w", "2", address],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    return result.returncode == 0
         except Exception as e:
             print(f"Ошибка при пинге {address}: {e}")
             return False
